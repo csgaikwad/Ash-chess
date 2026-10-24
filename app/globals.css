@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "IBM Plex Serif", ui-serif, Georgia, serif;
+  --color-bg: #0c0e12;
+  --color-bg-2: #12151b;
+  --color-surface: #171b22;
+  --color-surface-2: #101318;
+  --color-fg: #ece8e1;
+  --color-muted: #9a9388;
+  --color-faint: #6d675f;
+  --color-line: #2a3038;
+  --color-accent: #e6a15a;
+  --color-accent-2: #c4843a;
+  --color-danger: #e07a6a;
+}
+
+button {
+  @apply cursor-pointer transition duration-200 hover:scale-[103%];
+}
