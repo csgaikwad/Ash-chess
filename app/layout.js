@@ -1,8 +1,8 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "The Chess Club",
-  description: "Think ahead. Play better.",
+  title: "The Chess tools",
+  description: "Focus on chess and Play better.",
   icons: {
     icon: "/favicon.png",
   },
