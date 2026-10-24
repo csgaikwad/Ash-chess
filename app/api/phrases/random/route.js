@@ -8,17 +8,11 @@ export async function GET() {
 
     const [phrase] = await db
       .collection("phrases")
-      .aggregate([
-        { $sample: { size: 1 } },
-        { $project: { english: 1 } },
-      ])
+      .aggregate([{ $sample: { size: 1 } }, { $project: { english: 1 } }])
       .toArray();
 
     if (!phrase) {
-      return NextResponse.json(
-        { error: "No phrases found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "No phrases found" }, { status: 404 });
     }
 
     await db.collection("phraseSession").updateOne(
@@ -29,17 +23,17 @@ export async function GET() {
           updatedAt: new Date(),
         },
       },
-      { upsert: true }
+      { upsert: true },
     );
 
-    return NextResponse.json({
-      english: phrase.english,
+    return new NextResponse(phrase.english, {
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
     });
   } catch (error) {
     console.error("GET /api/phrases/random:", error);
     return NextResponse.json(
       { error: "Failed to get random phrase" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

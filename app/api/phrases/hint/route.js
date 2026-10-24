@@ -13,30 +13,23 @@ export async function GET() {
     if (!session) {
       return NextResponse.json(
         { error: "No active phrase. Get a random phrase first." },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
-    const phrase = await db.collection("phrases").findOne(
-      { _id: session.phraseId },
-      { projection: { bulgarian: 1 } }
-    );
+    const phrase = await db
+      .collection("phrases")
+      .findOne({ _id: session.phraseId }, { projection: { bulgarian: 1 } });
 
     if (!phrase) {
-      return NextResponse.json(
-        { error: "Phrase not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Phrase not found" }, { status: 404 });
     }
 
-    return NextResponse.json({
-      bulgarian: phrase.bulgarian,
+    return new NextResponse(phrase.bulgarian, {
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
     });
   } catch (error) {
     console.error("GET /api/phrases/hint:", error);
-    return NextResponse.json(
-      { error: "Failed to get hint" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to get hint" }, { status: 500 });
   }
 }
