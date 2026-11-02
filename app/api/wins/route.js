@@ -13,11 +13,12 @@ const DRAW_RESULTS = new Set([
   "timevsinsufficient",
 ]);
 
-export async function GET() {
+export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
-    const USERNAME = searchParams.get("username") || DEFAULT_USERNAME;
-
+    const USERNAME = (
+      searchParams.get("username") || DEFAULT_USERNAME
+    ).toLowerCase();
     const now = Math.floor(Date.now() / 1000);
     const cutoff = now - 24 * 60 * 60;
 
