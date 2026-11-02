@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-const USERNAME = "ashdeanna";
+const DEFAULT_USERNAME = "ashdeanna";
 
 const DRAW_RESULTS = new Set([
   "agreed",
@@ -15,6 +15,9 @@ const DRAW_RESULTS = new Set([
 
 export async function GET() {
   try {
+    const { searchParams } = new URL(request.url);
+    const USERNAME = searchParams.get("username") || DEFAULT_USERNAME;
+
     const now = Math.floor(Date.now() / 1000);
     const cutoff = now - 24 * 60 * 60;
 
@@ -26,8 +29,7 @@ export async function GET() {
       const year = date.getUTCFullYear();
       const month = String(date.getUTCMonth() + 1).padStart(2, "0");
 
-      const url =
-        `https://api.chess.com/pub/player/${USERNAME}/games/${year}/${month}`;
+      const url = `https://api.chess.com/pub/player/${USERNAME}/games/${year}/${month}`;
 
       const response = await fetch(url, {
         headers: {
@@ -96,7 +98,7 @@ export async function GET() {
 
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
