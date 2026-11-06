@@ -72,14 +72,12 @@ function getHistoryPeaks(history) {
     const entry = history.find(
       (item) => normalize(item?.name) === normalize(mode),
     );
-    console.log(entry);
 
     let highest = null;
     for (const point of entry?.points ?? []) {
       const rating = Number(point?.[3]);
       if (Number.isFinite(rating) && rating > 0) {
         highest = highest === null ? rating : Math.max(highest, rating);
-        console.log(highest, "hi");
       }
     }
     peaks[key] = highest;
@@ -91,7 +89,6 @@ function getHistoryPeaks(history) {
 export async function GET(request, { params }) {
   try {
     const { username } = await params;
-var abc;
 
     if (!username || !/^[a-zA-Z0-9_-]{2,30}$/.test(username)) {
       return NextResponse.json(
@@ -117,7 +114,7 @@ var abc;
           revalidate: 1800,
         },
       );
-      var abc = history;
+
       if (Array.isArray(history)) {
         historyPeaks = getHistoryPeaks(history);
       } else {
@@ -139,7 +136,6 @@ var abc;
     );
 
     return NextResponse.json({
-      abc,
       username: user.username,
       ratings,
       // false means peaks are only "current" because history was unavailable
