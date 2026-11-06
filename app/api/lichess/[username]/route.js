@@ -1,9 +1,4 @@
 import { NextResponse } from "next/server";
-import clientPromise from "@/lib/mongodb";
-
-export const dynamic = "force-dynamic";
-
-const CACHED_USERNAME = "lenachess02";
 
 const MODES = {
   ultraBullet: "UltraBullet",
@@ -12,53 +7,52 @@ const MODES = {
   rapid: "Rapid",
 };
 
-async function fetchLichess(url) {
+const LICHESS = "https://lichess.org/api/user";
+
+class LichessError extends Error {
+  constructor(status, url) {
+    super(`Lichess API error ${status} for ${url}`);
+    this.status = status;
+  }
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const normalize = (v) =>
+  String(v)
+    .replace(/[^a-z]/gi, "")
+    .toLowerCase();
+
+async function fetchLichess(url, { revalidate = 0, retries = 2 } = {}) {
   const headers = {
     Accept: "application/json",
     "User-Agent": "AshChess/1.0",
   };
 
-  // Optional token only for higher rate limits – never required
   const token = process.env.LICHESS_API_TOKEN;
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const response = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(8000),
+      ...(revalidate ? { next: { revalidate } } : { cache: "no-store" }),
+    });
+
+    if (response.ok) return response.json();
+
+    if (response.status === 429 && attempt < retries) {
+      const retryAfter = Number(response.headers.get("retry-after"));
+      const wait =
+        Number.isFinite(retryAfter) && retryAfter > 0
+          ? Math.min(retryAfter * 1000, 4000)
+          : 1500 * (attempt + 1);
+      await sleep(wait);
+      continue;
+    }
+
+    throw new LichessError(response.status, url);
   }
-
-  const response = await fetch(url, {
-    cache: "no-store",
-    headers,
-  });
-
-  if (!response.ok) {
-    throw new Error(`Lichess API error: ${response.status}`);
-  }
-
-  return response.json();
-}
-
-function getPeaks(history) {
-  const peaks = {};
-
-  for (const [key, mode] of Object.entries(MODES)) {
-    const normalize = (value) =>
-      String(value)
-        .replace(/[^a-z]/gi, "")
-        .toLowerCase();
-
-    const entry = history.find(
-      (item) => normalize(item.name) === normalize(mode),
-    );
-
-    const ratings = (entry?.points || [])
-      .map((point) => Number(point[3]))
-      .filter(Number.isFinite);
-
-    peaks[key] = ratings.length
-      ? ratings.reduce((highest, rating) => Math.max(highest, rating), 0)
-      : null;
-  }
-
-  return peaks;
 }
 
 function getCurrentRatings(perfs = {}) {
@@ -70,18 +64,34 @@ function getCurrentRatings(perfs = {}) {
   );
 }
 
-function mergePeaks(peaks, current) {
-  return Object.fromEntries(
-    Object.keys(MODES).map((key) => [
-      key,
-      Math.max(peaks?.[key] || 0, current[key] || 0) || null,
-    ]),
-  );
+// History points are [year, month (0-based), day, rating]
+function getHistoryPeaks(history) {
+  const peaks = {};
+
+  for (const [key, mode] of Object.entries(MODES)) {
+    const entry = history.find(
+      (item) => normalize(item?.name) === normalize(mode),
+    );
+    console.log(entry);
+
+    let highest = null;
+    for (const point of entry?.points ?? []) {
+      const rating = Number(point?.[3]);
+      if (Number.isFinite(rating) && rating > 0) {
+        highest = highest === null ? rating : Math.max(highest, rating);
+        console.log(highest, "hi");
+      }
+    }
+    peaks[key] = highest;
+  }
+
+  return peaks;
 }
 
 export async function GET(request, { params }) {
   try {
     const { username } = await params;
+var abc;
 
     if (!username || !/^[a-zA-Z0-9_-]{2,30}$/.test(username)) {
       return NextResponse.json(
@@ -90,92 +100,69 @@ export async function GET(request, { params }) {
       );
     }
 
-    const encodedUsername = encodeURIComponent(username);
-    const isCachedUser =
-      username.toLowerCase() === CACHED_USERNAME.toLowerCase();
+    const encoded = encodeURIComponent(username);
 
-    // Always fetch live profile (current ratings)
-    const user = await fetchLichess(
-      `https://lichess.org/api/user/${encodedUsername}`,
-    );
-
+    // 1) Current ratings: always live
+    const user = await fetchLichess(`${LICHESS}/${encoded}`);
     const current = getCurrentRatings(user.perfs);
 
-    let peaks;
-    let cached = false;
+    // 2) Peaks: from rating history (sequential, after the profile call)
+    let historyPeaks = null;
+    let historyError = null;
 
-    if (isCachedUser) {
-      const client = await clientPromise;
-      const db = process.env.MONGODB_DB
-        ? client.db(process.env.MONGODB_DB)
-        : client.db();
-
-      const collection = db.collection("lichess_peak_cache");
-
-      let record = await collection.findOne({ _id: CACHED_USERNAME });
-
-      if (!record) {
-        // First time – pull full history
-        const history = await fetchLichess(
-          `https://lichess.org/api/user/${encodedUsername}/rating-history`,
-        );
-        peaks = mergePeaks(getPeaks(history), current);
-      } else {
-        // Use previously stored peaks + live current
-        peaks = mergePeaks(record.peaks, current);
-      }
-
-      // Persist with $max so peaks can never go down
-      const peakUpdates = {};
-      for (const key of Object.keys(MODES)) {
-        if (peaks[key] !== null) {
-          peakUpdates[`peaks.${key}`] = peaks[key];
-        }
-      }
-
-      await collection.updateOne(
-        { _id: CACHED_USERNAME },
-        {
-          $setOnInsert: {
-            username: user.username, // keep the real casing
-            createdAt: new Date(),
-          },
-          ...(Object.keys(peakUpdates).length > 0
-            ? { $max: peakUpdates }
-            : {}),
-        },
-        { upsert: true },
-      );
-
-      // Re-read the final values after $max
-      record = await collection.findOne({ _id: CACHED_USERNAME });
-      peaks = record?.peaks || peaks;
-      cached = true;
-    } else {
-      // Everyone else – fetch history every time
+    try {
       const history = await fetchLichess(
-        `https://lichess.org/api/user/${encodedUsername}/rating-history`,
+        `${LICHESS}/${encoded}/rating-history`,
+        {
+          revalidate: 1800,
+        },
       );
-      peaks = mergePeaks(getPeaks(history), current);
+      var abc = history;
+      if (Array.isArray(history)) {
+        historyPeaks = getHistoryPeaks(history);
+      } else {
+        historyError = "Unexpected history format";
+      }
+    } catch (error) {
+      historyError = error.message;
+      console.error("Lichess rating-history failed:", error);
     }
 
+    // 3) Combine: peak is the highest ever seen, never below current
     const ratings = Object.fromEntries(
-      Object.keys(MODES).map((key) => [
-        key,
-        {
-          current: current[key],
-          peak: peaks[key] ?? null,
-        },
-      ]),
+      Object.keys(MODES).map((key) => {
+        const c = current[key];
+        const h = historyPeaks?.[key] ?? null;
+        const peak = Math.max(h ?? 0, c ?? 0);
+        return [key, { current: c, peak: peak > 0 ? peak : null }];
+      }),
     );
 
     return NextResponse.json({
+      abc,
       username: user.username,
       ratings,
-      cached,
+      // false means peaks are only "current" because history was unavailable
+      peaksFromHistory: historyPeaks !== null,
+      ...(historyError ? { historyError } : {}),
     });
   } catch (error) {
     console.error("Lichess ratings error:", error);
+
+    const status = error instanceof LichessError ? error.status : 500;
+
+    if (status === 404) {
+      return NextResponse.json(
+        { error: "Lichess user not found." },
+        { status: 404 },
+      );
+    }
+    if (status === 429) {
+      return NextResponse.json(
+        { error: "Lichess rate limit hit, try again in a minute." },
+        { status: 429 },
+      );
+    }
 
     return NextResponse.json(
       { error: "Unable to fetch Lichess ratings." },
